@@ -1,0 +1,347 @@
+extract obj_props
+
+//defining constants
+GRID_UNIT = 30
+ORIGIN_OFFSET = {
+    X: 15,
+    Y: 15,
+}
+MESH_OFFSET = {
+    X: GRID_UNIT * 6,
+    Y: GRID_UNIT * 2.5,
+}
+MESH_CENTER_X = MESH_OFFSET.X + GRID_UNIT * 2
+MESH_CENTER_Y = MESH_OFFSET.Y + GRID_UNIT * 2
+
+// camera stuff
+FOV = 3
+NEAR_PLANE = -7
+// customizable constants
+RENDER_EDGES = true
+EDGE_POINT_COUNT = 8
+EDGE_VERTEX_SCALING = 0.75
+MOVEMENT_DURATION = 0.35
+PERSPECTIVE = true
+PI_ITERATIONS = 5
+ROT_FACTOR_X = 0 
+ROT_FACTOR_Y = 1
+ROT_FACTOR_Z = 0
+ROUNDING_ACCURACY_DEC = 2 // should not be 0
+STEP_DEFINITION = 16
+VERTEX_SCALING = 0.5
+// groups and colors
+ADDITIONAL_VERTEX_GROUPS = [/*69g*/]
+ADDITIONAL_EDGE_GROUPS = [864g]
+VERTEX_COLOR = ?c
+EDGE_COLOR = ?c
+VERTEX_LAYER = 1
+EDGE_LAYER = 0
+
+VERTEX_COLOR.set(rgb8(0,0,0), blending = true)
+EDGE_COLOR.set(rgb8(58,102,222), blending = true)
+
+//-----------------------------------------------------------------------------------
+let DEFINED_VERTICES = []
+let ALL_EDGES = [] 
+let DEFINED_EDGES = []
+let EDGE_VERTEX_GROUPS = []
+let DEFINED_FACES = []
+//-----------------------------------------------------------------------------------
+//OBJ to mesh data algorithm
+
+let indices = []
+let coods = []
+let edge_counter = 0
+let f_indices = []
+let edge_vertex_indices = []
+
+lines = $.readfile("E:/Projekte/Programme/Spwn/3D_Mesh_Renderer/import_rotating.obj").split("\n")
+
+time_obj_parsing = $.time()
+
+for i in lines {
+    let merge = 0
+    if i.substr(0,2) == "v " {
+        for j in i.split(" ")[1:] {
+            coods.push($.round(@number(j) * 100) / 100)
+            merge++;
+            if merge % 3 == 0 {
+                DEFINED_VERTICES.push(coods)
+                coods = coods[3:]
+            }
+        }
+    }
+    if i.substr(0,2) == "f " && RENDER_EDGES {
+        for k in i.split(" ") {
+            indices.push(k)
+            if k == "f" {
+                f_indices.push(edge_counter)
+            }
+            edge_counter++;
+        }
+    }
+}
+
+if RENDER_EDGES {
+    for i in 0..f_indices.length {
+        if i == f_indices.length - 1 {
+            let edge_vert_counter = (indices.length) - f_indices[f_indices.length - 1]
+            for j in f_indices[f_indices.length - 1] + 1..indices.length {
+                edge_vertex_indices.push(indices[j].split("/"))
+            }
+            let bitch = []
+            for m in 1..edge_vert_counter {
+                bitch.push(@number(edge_vertex_indices[edge_vertex_indices.length - m][0]))
+            }
+            DEFINED_FACES.push(bitch)
+        } else {
+            let edge_vert_counter = f_indices[i+1] - f_indices[i]
+            for k in 1..edge_vert_counter {
+                edge_vertex_indices.push(indices[f_indices[i] + k].split("/"))
+            }
+            let bitch = []
+            for l in 1..edge_vert_counter {
+                bitch.push(@number(edge_vertex_indices[edge_vertex_indices.length - l][0]))
+            }
+            DEFINED_FACES.push(bitch)
+        }
+    }
+
+    for i in 0..DEFINED_FACES.length{
+        for j in 0..DEFINED_FACES[i].length {
+            if j == DEFINED_FACES[i].length - 1 {
+                let bitch = []
+                let v1 = DEFINED_FACES[i][j]; let v2 = DEFINED_FACES[i][0]
+                bitch.push(v1); bitch.push(v2)
+                ALL_EDGES.push(bitch)
+            } else {
+                let bitch = []
+                let v1 = DEFINED_FACES[i][j]; let v2 = DEFINED_FACES[i][j+1]
+                bitch.push(v1); bitch.push(v2)
+                ALL_EDGES.push(bitch)
+            }
+        }
+    }
+
+    for i in 0..ALL_EDGES.length {
+        let search_edge = ALL_EDGES[i]
+        let search_edge_swapped = [ALL_EDGES[i][1],ALL_EDGES[i][0]]
+        for j in 0..ALL_EDGES.length {
+            if i != j && (search_edge == ALL_EDGES[j] || search_edge_swapped == ALL_EDGES[j]) && (search_edge != [null, null] || search_edge_swapped != [null, null]) {
+                ALL_EDGES[j] = [null, null]
+            }
+        }
+    }
+
+    for k in 0..ALL_EDGES.length {
+        if ALL_EDGES[k] != [null, null] {
+            DEFINED_EDGES.push(ALL_EDGES[k])
+        }
+    }
+}
+
+$.print("[OBJ PARSING] {}s".fmt($.time() - time_obj_parsing))
+
+//-----------------------------------------------------------------------------------
+// defining utility data
+EDGE_COUNT = DEFINED_EDGES.length
+VERTEX_COUNT = DEFINED_VERTICES.length
+VERTEX_GROUPS = DEFINED_VERTICES.map(i => ?g)
+
+//-----------------------------------------------------------------------------------
+
+//defining functions
+let projection_vertices_1 = []
+
+time_defining_macros = $.time()
+
+dot_product_3x3 = (&matrix1: @array, &matrix2: @array) {
+    let matrix_res = [
+        [0,0,0],
+        [0,0,0],
+        [0,0,0],
+    ]
+    for i in 0..3 {
+        for j in 0..3 {
+            for k in 0..3 {
+                matrix_res[j][i] += (matrix1[j][k] * matrix2[k][i])
+            }
+        }
+    }
+    return matrix_res
+}
+
+dot_product_3x1 = (&matrix1: @array, &matrix2: @array) {
+    let matrix_res = [0,0,0]
+    for i in 0..3 {
+        for j in 0..3 {
+            matrix_res[i] += (matrix1[i][j] * matrix2[j])
+        }
+    }
+    return matrix_res
+}
+
+projection_matrix = (&point_orthographic: @array) {
+    PROJECTION_MATRIX = [
+    [(FOV - NEAR_PLANE) / (FOV - point_orthographic[2]),0,0],
+    [0,(FOV - NEAR_PLANE) / (FOV - point_orthographic[2]),0],
+    [0,0,point_orthographic[2]]
+    ]
+    return PROJECTION_MATRIX
+}
+
+create_vertex = (iteration: @number, &input_vertex: @array) {
+    $.add(obj{
+        OBJ_ID: 1764,
+        X: ORIGIN_OFFSET.X + MESH_CENTER_X + input_vertex[0] * GRID_UNIT,
+        Y: ORIGIN_OFFSET.Y + MESH_CENTER_Y + input_vertex[1] * GRID_UNIT,
+        SCALING: VERTEX_SCALING,
+        GROUPS: [VERTEX_GROUPS[iteration]] + ADDITIONAL_VERTEX_GROUPS,
+        EDITOR_LAYER_1: VERTEX_LAYER,
+        COLOR: VERTEX_COLOR,
+    })
+}
+
+calc_edge = (from_vertex1: @number, to_vertex2: @number, &vertex_dataset: @array) {
+    let edge_vertices = []
+    let frac = EDGE_POINT_COUNT + 1
+    for i in 0..EDGE_POINT_COUNT {
+        let vertex = []
+        for _xyz in 0..3 {
+            let vertex_component = null
+            let rounded_vertex_component = null
+            vertex_component = vertex_dataset[0][from_vertex1 - 1][_xyz] + ((i * (vertex_dataset[0][to_vertex2 - 1][_xyz] - vertex_dataset[0][from_vertex1 - 1][_xyz])) / (EDGE_POINT_COUNT - 1))
+            rounded_vertex_component = $.round(vertex_component * (10**ROUNDING_ACCURACY_DEC)) / (10**ROUNDING_ACCURACY_DEC)
+            vertex.push(rounded_vertex_component)
+        }
+        edge_vertices.push(vertex)
+    }
+
+    return edge_vertices
+}
+
+create_edge_vertex = (&input_vertex: @array, &edge_vertex_groups: @array, iteration: @number) {
+    $.add(obj{
+        OBJ_ID: 1764,
+        X: ORIGIN_OFFSET.X + MESH_CENTER_X + input_vertex[0] * GRID_UNIT,
+        Y: ORIGIN_OFFSET.Y + MESH_CENTER_Y + input_vertex[1] * GRID_UNIT,
+        SCALING: EDGE_VERTEX_SCALING,
+        GROUPS: [edge_vertex_groups[iteration]] + ADDITIONAL_EDGE_GROUPS,
+        EDITOR_LAYER_1: EDGE_LAYER,
+        COLOR: EDGE_COLOR,
+    })
+    return edge_vertex_groups[iteration]
+}
+
+$.print("[DEFINE MACROS] {}s".fmt($.time() - time_defining_macros))
+
+//--------------------------------------------------------------------------------------
+
+time_calculate_positions = $.time()
+
+for current_rot in 0..STEP_DEFINITION * PI_ITERATIONS {
+
+    //theta is the angle changing over time
+    //only changing the verts over time
+    let theta = current_rot * PI/STEP_DEFINITION;
+
+    rotation_matrix = {
+        X: [
+            [1,0,0],
+            [0,$.cos(theta * ROT_FACTOR_X), -$.sin(theta * ROT_FACTOR_X)],
+            [0, $.sin(theta * ROT_FACTOR_X), $.cos(theta * ROT_FACTOR_X)],
+        ],
+        Y: [
+            [$.cos(theta * ROT_FACTOR_Y),0,$.sin(theta * ROT_FACTOR_Y)],
+            [0,1,0],
+            [-$.sin(theta * ROT_FACTOR_Y), 0, $.cos(theta * ROT_FACTOR_Y)],
+        ],
+        Z: [
+            [$.cos(theta * ROT_FACTOR_Z),-$.sin(theta * ROT_FACTOR_Z),0],
+            [$.sin(theta * ROT_FACTOR_Z),$.cos(theta * ROT_FACTOR_Z),0],
+            [0,0,1],
+        ],
+    }
+    
+    let general_rotation_matrix = dot_product_3x3(dot_product_3x3(rotation_matrix.Z,rotation_matrix.Y),rotation_matrix.X)
+    let projection_vertices_memory = []
+    
+    //calculate and render vertices
+    for i in 0..VERTEX_COUNT {
+        let point_orthographic = dot_product_3x1(general_rotation_matrix, DEFINED_VERTICES[i])
+        if PERSPECTIVE {
+            let point_perspective = dot_product_3x1(projection_matrix(point_orthographic),point_orthographic)
+            projection_vertices_memory.push(point_perspective)
+        } else {
+            projection_vertices_memory.push(point_orthographic)
+        }
+        if current_rot == 0 {
+            create_vertex(i, projection_vertices_memory[i])
+        }
+    }
+    projection_vertices_1.push(projection_vertices_memory)
+}
+
+//calculate and render edges
+if RENDER_EDGES {
+    let projection_edges_memory = []
+    for i in 0..EDGE_COUNT {
+        let projection_edges_1 = []
+        let edge_vert_group_mem = []
+        let edge_group = []
+        projection_edges_memory = calc_edge(DEFINED_EDGES[i][0], DEFINED_EDGES[i][1], projection_vertices_1)
+        for j in 0..EDGE_POINT_COUNT {
+            projection_edges_1.push(projection_edges_memory[j])
+            if j == EDGE_POINT_COUNT - 1 {
+                edge_vert_group_mem = projection_edges_1.map(g => ?g)
+                for k in 0..projection_edges_1.length {
+                    edge_group.push(create_edge_vertex(projection_edges_1[k], edge_vert_group_mem, k))
+                }
+                EDGE_VERTEX_GROUPS.push(edge_group)
+            }
+        }
+    }
+}
+
+$.print("[CALCULATE POSITIONS] {}s".fmt($.time() - time_calculate_positions))
+
+//--------------------------------------------------------------------------------------
+
+time_triggers = $.time()
+
+//move vertices
+for p in 0..(STEP_DEFINITION * PI_ITERATIONS) - 1 {
+    if RENDER_EDGES {
+        // time_render_edges = $.time()
+        for r in 0..EDGE_COUNT {
+            for s in 0..EDGE_POINT_COUNT {
+                EDGE_POINT_COUNT_M1 = EDGE_POINT_COUNT - 1
+                x_follow_direct = ((EDGE_POINT_COUNT_M1) - (s)) / (EDGE_POINT_COUNT_M1) * ((projection_vertices_1[p + 1][DEFINED_EDGES[r][0] - 1][0] - projection_vertices_1[p][DEFINED_EDGES[r][0] - 1][0]) * 10)
+                y_follow_direct = ((EDGE_POINT_COUNT_M1) - (s)) / (EDGE_POINT_COUNT_M1) * ((projection_vertices_1[p + 1][DEFINED_EDGES[r][0] - 1][1] - projection_vertices_1[p][DEFINED_EDGES[r][0] - 1][1]) * 10)
+                x_follow_inverse = (s) / (EDGE_POINT_COUNT_M1)  * ((projection_vertices_1[p + 1][DEFINED_EDGES[r][1] - 1][0] - projection_vertices_1[p][DEFINED_EDGES[r][1] - 1][0]) * 10)
+                y_follow_inverse = (s) / (EDGE_POINT_COUNT_M1)   * ((projection_vertices_1[p + 1][DEFINED_EDGES[r][1] - 1][1] - projection_vertices_1[p][DEFINED_EDGES[r][1] - 1][1]) * 10)
+                if x_follow_direct.abs() >= 0.01 || y_follow_direct.abs() >= 0.01 {
+                    EDGE_VERTEX_GROUPS[r][s].follow(VERTEX_GROUPS[DEFINED_EDGES[r][0] - 1], x_follow_direct, y_follow_direct, 999)
+                }
+                if x_follow_inverse.abs() >= 0.01 || y_follow_inverse.abs() >= 0.01 {
+                    EDGE_VERTEX_GROUPS[r][s].follow(VERTEX_GROUPS[DEFINED_EDGES[r][1] - 1], x_follow_inverse, y_follow_inverse, 999)
+                }
+            }
+        }
+        // $.print("[RENDER EDGES] {} iterations".fmt(EDGE_COUNT * EDGE_POINT_COUNT))
+        // $.print("[RENDER EDGES] {}s".fmt($.time() - time_render_edges))
+        // $.print("[RENDER EDGES] {}s / iteration".fmt(($.time() - time_render_edges) / (EDGE_COUNT * EDGE_POINT_COUNT)))
+    }
+    for q in 0..VERTEX_COUNT {
+        -> VERTEX_GROUPS[q].precise_move(
+            (projection_vertices_1[p + 1][q][0] - projection_vertices_1[p][q][0]) * 10,
+            (projection_vertices_1[p + 1][q][1] - projection_vertices_1[p][q][1]) * 10,
+            duration = MOVEMENT_DURATION, single = true
+        )
+    }
+    wait(MOVEMENT_DURATION)
+}
+
+$.print("[TRIGGERS] {} iterations".fmt(STEP_DEFINITION * PI_ITERATIONS))
+$.print("[TRIGGERS] {}s".fmt($.time() - time_triggers))
+$.print("[TRIGGERS] {}s / iteration".fmt(($.time() - time_triggers) / (STEP_DEFINITION * PI_ITERATIONS)))
